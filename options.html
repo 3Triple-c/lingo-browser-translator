@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lingo It Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Lingo It</h1>
+      <p class="muted">
+        Set your Lingo.dev API key. All translations go through Lingo.dev.
+      </p>
+
+      <label class="label" for="apiKey">Lingo.dev API key</label>
+      <div class="row">
+        <input
+          id="apiKey"
+          type="password"
+          placeholder="Paste API key"
+          autocomplete="off"
+        />
+        <button id="save" type="button">Save</button>
+      </div>
+
+      <label class="label" for="apiUrl">Lingo.dev API URL (advanced)</label>
+      <div class="row">
+        <input
+          id="apiUrl"
+          type="text"
+          placeholder="https://api.lingo.dev"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <label class="label" for="engineId">Engine ID (optional)</label>
+      <div class="row">
+        <input
+          id="engineId"
+          type="text"
+          placeholder="Leave empty to use default"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <details class="hint">
+        <summary>Troubleshooting</summary>
+        <ul>
+          <li>
+            If translation fails, verify the key and reload the extension.
+          </li>
+          <li>Some pages have huge text; try a smaller page first.</li>
+        </ul>
+      </details>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

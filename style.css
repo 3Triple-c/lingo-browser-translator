@@ -1,0 +1,139 @@
+/* Popup styling (intentionally compact, no external deps) */
+:root {
+  --bg: #0b1220;
+  --panel: rgba(255, 255, 255, 0.08);
+  --text: #eaf0ff;
+  --muted: rgba(234, 240, 255, 0.75);
+  --accent: #37d3a7;
+  --danger: #ff6b6b;
+  --border: rgba(255, 255, 255, 0.12);
+}
+
+html,
+body {
+  background: radial-gradient(900px 300px at 30% -10%, rgba(55, 211, 167, 0.22), transparent 60%),
+    radial-gradient(700px 320px at 90% 0%, rgba(124, 92, 255, 0.20), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font: 14px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  margin: 0;
+}
+
+body {
+  width: 280px;
+  padding: 12px 12px 10px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+h3 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.2px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 0 6px;
+}
+
+select {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 10px;
+  outline: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 10px;
+  cursor: pointer;
+}
+
+button#apply {
+  border-color: rgba(55, 211, 167, 0.45);
+  background: rgba(55, 211, 167, 0.14);
+}
+
+button#restore {
+  border-color: rgba(255, 107, 107, 0.45);
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.status {
+  margin: 10px 2px 0;
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Toggle switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--border);
+  transition: 0.2s;
+  border-radius: 999px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  transition: 0.2s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background: rgba(55, 211, 167, 0.35);
+  border-color: rgba(55, 211, 167, 0.55);
+}
+
+input:checked + .slider:before {
+  transform: translateX(18px);
+  background: rgba(234, 240, 255, 0.95);
+}

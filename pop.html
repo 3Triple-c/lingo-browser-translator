@@ -1,18 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html>
   <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h3>Lingo It</h3>
+    <header>
+      <h3>Lingo It</h3>
+      <label class="switch" title="Toggle translation on this page">
+        <input id="enabled" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </header>
 
-    <select id="language">
-      <option value="es">Spanish</option>
-      <option value="fr">French</option>
-      <option value="ar">Arabic</option>
-    </select>
+    <div class="field">
+      <label for="language">Translate to</label>
+      <select id="language">
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <option value="ar">Arabic</option>
+      </select>
+    </div>
 
-    <button id="translate">Translate Page</button>
+    <div class="row">
+      <button id="apply" type="button">Apply</button>
+      <button id="restore" type="button">Restore</button>
+    </div>
+
+    <p id="status" class="status" aria-live="polite"></p>
 
     <script src="pop.js"></script>
   </body>

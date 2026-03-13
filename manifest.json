@@ -1,17 +1,22 @@
 {
 "manifest_version": 3,
-  "name": "Lingo Translator",
+  "name": "Lingo It",
   "version": "1.0",
-  "description": "Translate any webpage instantly",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "description": "Universal web translator with one toggle",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["https://*.lingo.dev/*"],
   "action": {
     "default_popup": "pop.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
   ]
 }

@@ -1,0 +1,96 @@
+:root {
+  --bg: #0b1220;
+  --panel: rgba(255, 255, 255, 0.08);
+  --text: #eaf0ff;
+  --muted: rgba(234, 240, 255, 0.75);
+  --accent: #37d3a7;
+  --border: rgba(255, 255, 255, 0.12);
+}
+
+html,
+body {
+  background: radial-gradient(1100px 400px at 30% -10%, rgba(55, 211, 167, 0.22), transparent 60%),
+    radial-gradient(900px 380px at 90% 0%, rgba(124, 92, 255, 0.20), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  margin: 0;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 36px auto;
+  padding: 0 18px;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: 0.2px;
+}
+
+.muted {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.label {
+  display: block;
+  margin: 14px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+input {
+  flex: 1;
+  min-width: 220px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 12px;
+  outline: none;
+}
+
+button {
+  appearance: none;
+  border: 1px solid rgba(55, 211, 167, 0.45);
+  background: rgba(55, 211, 167, 0.14);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status {
+  min-height: 18px;
+  margin: 10px 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hint {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px 12px;
+}
+
+.hint summary {
+  cursor: pointer;
+  color: rgba(234, 240, 255, 0.9);
+}
+
+.hint ul {
+  margin: 10px 0 0 18px;
+  color: var(--muted);
+}
+
