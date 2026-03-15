@@ -4,6 +4,8 @@ const DEFAULT_SETTINGS = {
   enabled: false,
   targetLang: "es",
   highlight: false,
+  emergencyMode: false,
+  translateAttributes: true,
 };
 
 const MAX_CONCURRENT_REQUESTS = 4;
@@ -17,6 +19,10 @@ const originalTextByNode = new WeakMap();
 const translatedByNode = new WeakMap(); // { targetLang, translated }
 const touchedNodes = new Set();
 
+const originalAttrsByEl = new WeakMap(); // Element -> Map(attr -> original)
+const touchedAttrsByEl = new WeakMap(); // Element -> Set(attr)
+const touchedAttrEls = new Set(); // Element
+
 // Cache translations by (targetLang + text).
 const translationCache = new Map();
 
@@ -26,6 +32,14 @@ let activeRequests = 0;
 const requestQueue = [];
 
 let lastErrorMessage = "";
+let translationRunId = 0;
+let activeRunId = 0;
+let lastStatus = { total: 0, done: 0, failed: 0, message: "" };
+let scheduledViewportScan = null;
+let scheduledBackfill = null;
+let backfillState = null; // { runId, targetLang, sources, itemsBySource, index }
+
+const EMERGENCY_KEYWORDS = ["fire", "help", "danger", "emergency", "warning", "police", "hospital"];
 
 function isElementSkippable(el) {
   if (!el) return true;
@@ -56,17 +70,26 @@ function isElementVisible(el) {
   const style = window.getComputedStyle(el);
   if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
 
-  // Cheap offscreen check; avoids lots of work on huge pages.
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return false;
   return true;
+}
+
+function isElementInViewport(el, marginPx = 150) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  const top = rect.top;
+  const bottom = rect.bottom;
+  const vpTop = 0 - marginPx;
+  const vpBottom = (window.innerHeight || document.documentElement.clientHeight || 0) + marginPx;
+  return bottom >= vpTop && top <= vpBottom;
 }
 
 function normalizeText(text) {
   return (text || "").replace(/\s+/g, " ").trim();
 }
 
-function getTextNodes(root = document.body) {
+function getTextNodes(root = document.body, { onlyInViewport = false } = {}) {
   if (!root) return [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -74,6 +97,7 @@ function getTextNodes(root = document.body) {
       if (!parent) return NodeFilter.FILTER_REJECT;
       if (isElementSkippable(parent)) return NodeFilter.FILTER_REJECT;
       if (!isElementVisible(parent)) return NodeFilter.FILTER_REJECT;
+      if (onlyInViewport && !isElementInViewport(parent)) return NodeFilter.FILTER_REJECT;
       const normalized = normalizeText(node.nodeValue);
       if (normalized.length < MIN_TEXT_LEN) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
@@ -98,6 +122,16 @@ function scheduleTranslateNewContent() {
   }, 250);
 }
 
+function scheduleViewportTranslate() {
+  if (!settings.enabled) return;
+  if (scheduledViewportScan) return;
+  scheduledViewportScan = setTimeout(() => {
+    scheduledViewportScan = null;
+    // Translate newly visible content quickly without re-queuing the entire page.
+    translatePage({ limit: 140, onlyInViewport: true });
+  }, 200);
+}
+
 function recordError(err) {
   const msg = err?.message || String(err);
   lastErrorMessage = msg;
@@ -110,6 +144,10 @@ function enqueueRequest(fn) {
     requestQueue.push({ fn, resolve, reject });
     pumpQueue();
   });
+}
+
+function clearQueue() {
+  requestQueue.length = 0;
 }
 
 function pumpQueue() {
@@ -128,6 +166,11 @@ function pumpQueue() {
         pumpQueue();
       });
   }
+}
+
+function isEmergencyText(text) {
+  const t = (text || "").toLowerCase();
+  return EMERGENCY_KEYWORDS.some(k => t.includes(k));
 }
 
 function translateInBackground(text, targetLang) {
@@ -216,10 +259,198 @@ function applyTranslationToNode(textNode, translated) {
   }
 }
 
-async function translatePage({ limit = null, awaitCompletion = false } = {}) {
+function getOriginalAttr(el, attr) {
+  const map = originalAttrsByEl.get(el);
+  return map ? map.get(attr) : undefined;
+}
+
+function setOriginalAttr(el, attr, value) {
+  let map = originalAttrsByEl.get(el);
+  if (!map) {
+    map = new Map();
+    originalAttrsByEl.set(el, map);
+  }
+  if (!map.has(attr)) map.set(attr, value);
+}
+
+function markTouchedAttr(el, attr) {
+  let set = touchedAttrsByEl.get(el);
+  if (!set) {
+    set = new Set();
+    touchedAttrsByEl.set(el, set);
+  }
+  set.add(attr);
+  touchedAttrEls.add(el);
+}
+
+function applyTranslationToAttr(el, attr, translated) {
+  const prev = el.getAttribute(attr);
+  if (prev === null) return;
+  setOriginalAttr(el, attr, prev);
+  markTouchedAttr(el, attr);
+  el.setAttribute(attr, translated);
+}
+
+function getAttributeItems({ onlyInViewport = false } = {}) {
+  if (!settings.translateAttributes) return [];
+  const out = [];
+  const els = document.querySelectorAll("img[alt], img[title]");
+  for (const el of els) {
+    if (!(el instanceof Element)) continue;
+    if (!isElementVisible(el)) continue;
+    if (onlyInViewport && !isElementInViewport(el)) continue;
+
+    for (const attr of ["alt", "title"]) {
+      const v = el.getAttribute(attr);
+      const norm = normalizeText(v);
+      if (!norm || norm.length < MIN_TEXT_LEN) continue;
+      out.push({ el, attr, text: norm, emergency: settings.emergencyMode && isEmergencyText(norm) });
+    }
+  }
+  return out;
+}
+
+async function loadSettingsForSite() {
+  const stored = await chrome.storage.sync.get({
+    ...DEFAULT_SETTINGS,
+    sitePrefs: {},
+  });
+  let next = { ...DEFAULT_SETTINGS, ...stored };
+
+  try {
+    const host = location.hostname || "";
+    const pref = host ? stored.sitePrefs?.[host] : null;
+    if (pref?.enabled) {
+      next.enabled = true;
+      if (typeof pref.targetLang === "string" && pref.targetLang) next.targetLang = pref.targetLang;
+    }
+  } catch {
+    // Ignore.
+  }
+
+  settings = next;
+}
+
+function updateStatus(patch) {
+  lastStatus = { ...lastStatus, ...(patch || {}) };
+}
+
+function scheduleBackfill() {
+  if (!settings.enabled) return;
+  if (scheduledBackfill) return;
+  const cb = () => {
+    scheduledBackfill = null;
+    translateBackfillChunk();
+  };
+  if (typeof requestIdleCallback === "function") {
+    scheduledBackfill = requestIdleCallback(cb, { timeout: 1200 });
+  } else {
+    scheduledBackfill = setTimeout(cb, 250);
+  }
+}
+
+function cancelBackfill() {
+  if (!scheduledBackfill) return;
+  if (typeof scheduledBackfill === "number") clearTimeout(scheduledBackfill);
+  else if (typeof cancelIdleCallback === "function") cancelIdleCallback(scheduledBackfill);
+  scheduledBackfill = null;
+  backfillState = null;
+}
+
+function buildItemsBySource({ onlyInViewport = false } = {}) {
+  const nodesAll = getTextNodes(document.body, { onlyInViewport });
+  const itemsBySource = new Map(); // source -> { nodes: Node[], attrs: [] }
+
+  for (const node of nodesAll) {
+    const normalized = normalizeText(node.nodeValue);
+    if (normalized.length < MIN_TEXT_LEN) continue;
+    const prev = translatedByNode.get(node);
+    if (prev && prev.targetLang === settings.targetLang && prev.translated === node.nodeValue) continue;
+
+    const source = normalizeText(originalTextByNode.get(node) || node.nodeValue);
+    if (source.length < MIN_TEXT_LEN) continue;
+
+    const entry = itemsBySource.get(source) || { nodes: [], attrs: [] };
+    entry.nodes.push(node);
+    itemsBySource.set(source, entry);
+  }
+
+  const attrItems = getAttributeItems({ onlyInViewport });
+  for (const it of attrItems) {
+    const entry = itemsBySource.get(it.text) || { nodes: [], attrs: [] };
+    entry.attrs.push(it);
+    itemsBySource.set(it.text, entry);
+  }
+
+  return itemsBySource;
+}
+
+function buildSources(itemsBySource) {
+  let sources = Array.from(itemsBySource.keys());
+  if (settings.emergencyMode) {
+    sources.sort((a, b) => {
+      const ae = isEmergencyText(a) ? 1 : 0;
+      const be = isEmergencyText(b) ? 1 : 0;
+      return be - ae;
+    });
+  }
+  return sources;
+}
+
+function translateBackfillChunk() {
+  if (!settings.enabled) return;
+  if (!backfillState || backfillState.runId !== activeRunId || backfillState.targetLang !== settings.targetLang) {
+    return;
+  }
+
+  const { sources, itemsBySource } = backfillState;
+  if (backfillState.index >= sources.length) {
+    updateStatus({ message: "Done" });
+    return;
+  }
+
+  const targetLang = settings.targetLang;
+  const runId = activeRunId;
+  const start = backfillState.index;
+  const end = Math.min(sources.length, start + BATCH_SIZE * 2);
+  backfillState.index = end;
+
+  const chunkSources = sources.slice(start, end);
+  enqueueRequest(async () => {
+    if (runId !== activeRunId) return 0;
+    const translations = await translateBatch(chunkSources, targetLang);
+    if (!settings.enabled || settings.targetLang !== targetLang || runId !== activeRunId) return 0;
+
+    let applied = 0;
+    for (let j = 0; j < chunkSources.length; j += 1) {
+      const source = chunkSources[j];
+      const tr = translations[j] || "";
+      const entry = itemsBySource.get(source) || { nodes: [], attrs: [] };
+      for (const node of entry.nodes) {
+        if (!node.parentElement || !node.parentElement.isConnected) continue;
+        applyTranslationToNode(node, tr);
+        applied += 1;
+      }
+      for (const it of entry.attrs) {
+        if (!it.el || !it.el.isConnected) continue;
+        applyTranslationToAttr(it.el, it.attr, tr);
+      }
+    }
+    updateStatus({
+      done: Math.min(lastStatus.total, lastStatus.done + chunkSources.length),
+      message: `Translated ${applied} (backfill)`,
+    });
+    return applied;
+  }).catch(() => {});
+
+  // Keep filling in idle time.
+  scheduleBackfill();
+}
+
+async function translatePage({ limit = null, awaitCompletion = false, onlyInViewport = false, updateTotals = true } = {}) {
   if (!settings.enabled) return { ok: true, skipped: true };
   const targetLang = settings.targetLang;
-  const nodesAll = getTextNodes();
+  const nodesAll = getTextNodes(document.body, { onlyInViewport });
   const nodes = typeof limit === "number" ? nodesAll.slice(0, Math.max(0, limit)) : nodesAll;
 
   let candidates = 0;
@@ -227,45 +458,61 @@ async function translatePage({ limit = null, awaitCompletion = false } = {}) {
   let translated = 0;
   let failed = 0;
   const pending = [];
+  const runId = activeRunId;
 
-  // Collect nodes by source text so we can batch.
-  const nodesBySource = new Map(); // source -> Node[]
+  // Collect items by source text so we can batch.
+  const itemsBySource = new Map(); // source -> { nodes: [], attrs: [] }
   for (const node of nodes) {
     const normalized = normalizeText(node.nodeValue);
     if (normalized.length < MIN_TEXT_LEN) continue;
-
-    // If this node was already translated to the same target, skip.
     const prev = translatedByNode.get(node);
     if (prev && prev.targetLang === targetLang && prev.translated === node.nodeValue) continue;
-
     const source = normalizeText(originalTextByNode.get(node) || node.nodeValue);
     if (source.length < MIN_TEXT_LEN) continue;
-
     candidates += 1;
-    const list = nodesBySource.get(source) || [];
-    list.push(node);
-    nodesBySource.set(source, list);
+    const entry = itemsBySource.get(source) || { nodes: [], attrs: [] };
+    entry.nodes.push(node);
+    itemsBySource.set(source, entry);
   }
 
-  const sources = Array.from(nodesBySource.keys());
+  const attrItems = getAttributeItems({ onlyInViewport });
+  for (const it of attrItems) {
+    candidates += 1;
+    const entry = itemsBySource.get(it.text) || { nodes: [], attrs: [] };
+    entry.attrs.push(it);
+    itemsBySource.set(it.text, entry);
+  }
+
+  const sources = buildSources(itemsBySource);
+
+  if (updateTotals) updateStatus({ total: sources.length, done: 0, failed: 0, message: "Translating..." });
   for (let i = 0; i < sources.length; i += BATCH_SIZE) {
     const chunk = sources.slice(i, i + BATCH_SIZE);
     const p = enqueueRequest(async () => {
+      if (runId !== activeRunId) return 0;
       const translations = await translateBatch(chunk, targetLang);
       // Only apply if still enabled and language unchanged.
-      if (!settings.enabled || settings.targetLang !== targetLang) return 0;
+      if (!settings.enabled || settings.targetLang !== targetLang || runId !== activeRunId) return 0;
 
       let applied = 0;
       for (let j = 0; j < chunk.length; j += 1) {
         const source = chunk[j];
         const tr = translations[j] || "";
-        const nodeList = nodesBySource.get(source) || [];
-        for (const node of nodeList) {
+        const entry = itemsBySource.get(source) || { nodes: [], attrs: [] };
+        for (const node of entry.nodes) {
           if (!node.parentElement || !node.parentElement.isConnected) continue;
           applyTranslationToNode(node, tr);
           applied += 1;
         }
+        for (const it of entry.attrs) {
+          if (!it.el || !it.el.isConnected) continue;
+          applyTranslationToAttr(it.el, it.attr, tr);
+        }
       }
+      updateStatus({
+        done: Math.min(lastStatus.total, lastStatus.done + chunk.length),
+        message: `Translated ${translated + applied} items`,
+      });
       return applied;
     })
       .then((applied) => {
@@ -274,6 +521,11 @@ async function translatePage({ limit = null, awaitCompletion = false } = {}) {
       .catch(() => {
         // Count a batch failure as failures for its chunk size (approx).
         failed += chunk.length;
+        updateStatus({
+          done: Math.min(lastStatus.total, lastStatus.done + chunk.length),
+          failed: lastStatus.failed + chunk.length,
+          message: `Translated ${translated} items (errors)`,
+        });
       });
 
     queued += 1;
@@ -311,6 +563,19 @@ function restorePage() {
       node.parentElement.style.outlineOffset = "";
     }
   }
+  for (const el of Array.from(touchedAttrEls)) {
+    if (!el || !el.isConnected) {
+      touchedAttrEls.delete(el);
+      continue;
+    }
+    const attrs = touchedAttrsByEl.get(el);
+    const originals = originalAttrsByEl.get(el);
+    if (!attrs || !originals) continue;
+    for (const a of attrs) {
+      if (originals.has(a)) el.setAttribute(a, originals.get(a));
+    }
+  }
+  updateStatus({ total: 0, done: 0, failed: 0, message: "" });
   return { ok: true };
 }
 
@@ -322,17 +587,19 @@ function startObserver() {
     subtree: true,
     characterData: true,
   });
+
+  window.addEventListener("scroll", scheduleViewportTranslate, { passive: true });
 }
 
 function stopObserver() {
   if (!observer) return;
   observer.disconnect();
   observer = null;
+  window.removeEventListener("scroll", scheduleViewportTranslate);
 }
 
 async function loadSettings() {
-  const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  settings = { ...DEFAULT_SETTINGS, ...stored };
+  await loadSettingsForSite();
 }
 
 async function applySettingsPatch(patch) {
@@ -349,12 +616,49 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     try {
       if (request?.action === "settingsChanged") {
         await applySettingsPatch(request.patch);
+        if (request?.patch && request.patch.enabled === false) {
+          // Stop any work when toggled off from the popup.
+          activeRunId = ++translationRunId;
+          clearQueue();
+          cancelBackfill();
+          updateStatus({ total: 0, done: 0, failed: 0, message: "" });
+          sendResponse({ ok: true });
+          return;
+        }
+
         if (settings.enabled) {
-          // If the language changed, restore then re-translate immediately without reload.
-          if (request.patch && typeof request.patch.targetLang === "string") {
-            restorePage();
-          }
+          // Seamless retarget: keep current text until replacements arrive.
+          activeRunId = ++translationRunId;
+          cancelBackfill();
+          clearQueue();
           translatePage();
+          // Restart backfill with new settings/lang.
+          const itemsBySource = buildItemsBySource({ onlyInViewport: false });
+          const sources = buildSources(itemsBySource);
+          backfillState = { runId: activeRunId, targetLang: settings.targetLang, sources, itemsBySource, index: 0 };
+          updateStatus({ total: sources.length, done: 0, failed: 0, message: "Translating..." });
+          scheduleBackfill();
+        }
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (request?.action === "sitePrefChanged") {
+        // Re-load computed settings (global + per-site).
+        await loadSettingsForSite();
+        if (settings.enabled) {
+          activeRunId = ++translationRunId;
+          cancelBackfill();
+          clearQueue();
+          startObserver();
+          const itemsBySource = buildItemsBySource({ onlyInViewport: false });
+          const sources = buildSources(itemsBySource);
+          backfillState = { runId: activeRunId, targetLang: settings.targetLang, sources, itemsBySource, index: 0 };
+          updateStatus({ total: sources.length, done: 0, failed: 0, message: "Translating..." });
+          translatePage({ onlyInViewport: true, limit: 120, updateTotals: false });
+          scheduleBackfill();
+        } else {
+          stopObserver();
         }
         sendResponse({ ok: true });
         return;
@@ -363,6 +667,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       if (request?.action === "translateNow") {
         await applySettingsPatch({ enabled: true });
         lastErrorMessage = "";
+        activeRunId = ++translationRunId;
+        clearQueue();
+        cancelBackfill();
+        updateStatus({ total: 0, done: 0, failed: 0, message: "Starting..." });
 
         // Probe request so the popup can show auth/API problems immediately.
         try {
@@ -373,18 +681,45 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
           return;
         }
 
-        // Translate a limited set and await, so the user sees something change right away.
-        const res = await translatePage({ limit: 80, awaitCompletion: true });
-        // Keep going in the background for the rest of the page.
-        translatePage();
+        // Build full backfill plan (so progress is meaningful).
+        const itemsBySource = buildItemsBySource({ onlyInViewport: false });
+        const sources = buildSources(itemsBySource);
+        backfillState = { runId: activeRunId, targetLang: settings.targetLang, sources, itemsBySource, index: 0 };
+        updateStatus({ total: sources.length, done: 0, failed: 0, message: "Translating..." });
+
+        // Translate what the user can see first, then continue in idle time.
+        const res = await translatePage({
+          limit: 120,
+          awaitCompletion: true,
+          onlyInViewport: true,
+          updateTotals: false,
+        });
+        scheduleBackfill();
         sendResponse(res);
         return;
       }
 
       if (request?.action === "restoreNow") {
         await applySettingsPatch({ enabled: false });
+        activeRunId = ++translationRunId;
+        clearQueue();
+        cancelBackfill();
         const res = restorePage();
         sendResponse(res);
+        return;
+      }
+
+      if (request?.action === "stopNow") {
+        activeRunId = ++translationRunId;
+        clearQueue();
+        cancelBackfill();
+        updateStatus({ message: "Stopped" });
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (request?.action === "getStatus") {
+        sendResponse({ ok: true, status: lastStatus });
         return;
       }
 
@@ -398,9 +733,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 
 (async function init() {
-  await loadSettings();
+  await loadSettingsForSite();
   if (settings.enabled) {
     startObserver();
-    translatePage();
+    activeRunId = ++translationRunId;
+    translatePage({ onlyInViewport: true });
+    translatePage({ onlyInViewport: false });
   }
 })();

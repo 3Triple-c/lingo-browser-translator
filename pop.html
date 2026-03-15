@@ -6,29 +6,99 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header>
-      <h3>Lingo It</h3>
-      <label class="switch" title="Toggle translation on this page">
-        <input id="enabled" type="checkbox" />
-        <span class="slider"></span>
-      </label>
-    </header>
+    <div class="app" role="application" aria-label="Lingo It">
+      <header class="top">
+        <div class="brand">
+          <div class="mark" aria-hidden="true"></div>
+          <div class="wordmark">
+            <div class="title">Lingo It</div>
+            <div class="subtitle">Universal web translator</div>
+          </div>
+        </div>
 
-    <div class="field">
-      <label for="language">Translate to</label>
-      <select id="language">
-        <option value="es">Spanish</option>
-        <option value="fr">French</option>
-        <option value="ar">Arabic</option>
-      </select>
+        <div class="topActions">
+          <button id="theme" class="iconBtn" type="button" title="Toggle theme">
+            <span class="icon" aria-hidden="true"></span>
+          </button>
+
+          <label class="switch" title="Toggle translation on this page">
+            <input id="enabled" type="checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="field">
+          <label for="language">Translate to</label>
+          <div class="dropdown" id="languageDropdown">
+            <select id="language" class="srOnly" aria-hidden="true" tabindex="-1">
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="ar">Arabic</option>
+            </select>
+
+            <button
+              id="languageBtn"
+              class="ddBtn"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >
+              <span id="languageLabel">Spanish</span>
+              <span class="ddChev" aria-hidden="true"></span>
+            </button>
+
+            <div id="languageMenu" class="ddMenu" role="listbox" tabindex="-1">
+              <button class="ddItem" type="button" role="option" data-value="es">
+                Spanish
+              </button>
+              <button class="ddItem" type="button" role="option" data-value="fr">
+                French
+              </button>
+              <button class="ddItem" type="button" role="option" data-value="ar">
+                Arabic
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="toggles">
+          <label class="pill">
+            <input id="highlight" type="checkbox" />
+            <span>Highlight</span>
+          </label>
+          <label class="pill">
+            <input id="emergency" type="checkbox" />
+            <span>Emergency</span>
+          </label>
+          <label class="pill">
+            <input id="autoSite" type="checkbox" />
+            <span>Auto on site</span>
+          </label>
+          <label class="pill">
+            <input id="attrs" type="checkbox" />
+            <span>Images</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <button id="apply" class="btn btnPrimary" type="button">Apply</button>
+          <button id="restore" class="btn btnDanger" type="button">Restore</button>
+        </div>
+
+        <div class="row row2">
+          <button id="stop" class="btn" type="button">Stop</button>
+          <button id="options" class="btn btnGhost" type="button">Options</button>
+        </div>
+
+        <div class="meter" aria-hidden="true">
+          <div id="meterBar" class="meterbar"></div>
+        </div>
+
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
     </div>
-
-    <div class="row">
-      <button id="apply" type="button">Apply</button>
-      <button id="restore" type="button">Restore</button>
-    </div>
-
-    <p id="status" class="status" aria-live="polite"></p>
 
     <script src="pop.js"></script>
   </body>
